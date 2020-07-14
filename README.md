@@ -1,4 +1,4 @@
-# Blink Example
+# Main Example
 
 Starts a FreeRTOS task to blink an LED
 
