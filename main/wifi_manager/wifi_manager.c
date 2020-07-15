@@ -107,10 +107,6 @@ void wifi_manager_disconnect_async(){
 
 
 void wifi_manager_start(){
-
-	/* disable the default wifi logging */
-	esp_log_level_set("wifi", ESP_LOG_NONE);
-
 	/* initialize flash memory */
 	nvs_flash_init();
 
@@ -171,13 +167,6 @@ esp_err_t wifi_manager_save_sta_config(){
 		ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: SoftAP_bandwidth (1 = 20MHz, 2 = 40MHz): %i",wifi_settings.ap_bandwidth);
 		ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: sta_only (0 = APSTA, 1 = STA when connected): %i",wifi_settings.sta_only);
 		ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: sta_power_save (1 = yes): %i",wifi_settings.sta_power_save);
-
-		//TODO: suport for static IP
-		//ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: sta_static_ip (0 = dhcp client, 1 = static ip): %i",wifi_settings.sta_static_ip);
-		//ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: sta_ip_addr: %s", IP2STR(&wifi_settings.sta_static_ip_config.ip));
-		//ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: sta_gw_addr: %s", IP2STR(&wifi_settings.sta_static_ip_config.gw));
-		//ESP_LOGD(TAG, "wifi_manager_wrote wifi_settings: sta_netmask: %s", IP2STR(&wifi_settings.sta_static_ip_config.netmask));
-
 	}
 
 	return ESP_OK;
@@ -216,7 +205,6 @@ bool wifi_manager_fetch_wifi_sta_config(){
 			return false;
 		}
 		memcpy(wifi_manager_config_sta->sta.password, buff, sz);
-		/* memcpy(wifi_manager_config_sta->sta.password, "lewrong", strlen("lewrong")); this is debug to force a wrong password event. ignore! */
 
 		/* settings */
 		sz = sizeof(wifi_settings);
@@ -240,12 +228,6 @@ bool wifi_manager_fetch_wifi_sta_config(){
 		ESP_LOGD(TAG, "wifi_manager_fetch_wifi_settings: sta_power_save (1 = yes):%i",wifi_settings.sta_power_save);
 		ESP_LOGD(TAG, "wifi_manager_fetch_wifi_settings: sta_static_ip (0 = dhcp client, 1 = static ip):%i",wifi_settings.sta_static_ip);
 
-		//TODO: support for static IP
-		//ESP_LOGD(TAG, "wifi_manager_fetch_wifi_settings: sta_static_ip_config: IP: %s , GW: %s , Mask: %s", IP2STR(&wifi_settings.sta_static_ip_config.ip), IP2STR(&wifi_settings.sta_static_ip_config.gw), IP2STR(&wifi_settings.sta_static_ip_config.netmask));
-		//ESP_LOGD(TAG, "wifi_manager_fetch_wifi_settings: sta_ip_addr: %s", IP2STR(&wifi_settings.sta_static_ip_config.ip));
-		//ESP_LOGD(TAG, "wifi_manager_fetch_wifi_settings: sta_gw_addr: %s", IP2STR(&wifi_settings.sta_static_ip_config.gw));
-		//ESP_LOGD(TAG, "wifi_manager_fetch_wifi_settings: sta_netmask: %s", IP2STR(&wifi_settings.sta_static_ip_config.netmask));
-
 		return wifi_manager_config_sta->sta.ssid[0] != '\0';
 	} else{
 		return false;
@@ -258,7 +240,7 @@ void wifi_manager_clear_ip_info_json(){
 }
 
 
-void wifi_manager_generate_ip_info_json(update_reason_code_t update_reason_code){
+void wifi_manager_generate_ip_info_json(update_reason_code_t update_reason_code) {
 
 	wifi_config_t *config = wifi_manager_get_wifi_sta_config();
 	if(config){
@@ -305,18 +287,15 @@ void wifi_manager_generate_ip_info_json(update_reason_code_t update_reason_code)
 	else{
 		wifi_manager_clear_ip_info_json();
 	}
-
-
 }
 
 
-void wifi_manager_clear_access_points_json(){
+void wifi_manager_clear_access_points_json() {
 	strcpy(accessp_json, "[]\n");
 }
-void wifi_manager_generate_acess_points_json(){
+void wifi_manager_generate_acess_points_json() {
 
 	strcpy(accessp_json, "[");
-
 
 	const char oneap_str[] = ",\"chan\":%d,\"rssi\":%d,\"auth\":%d}%c\n";
 
@@ -343,28 +322,23 @@ void wifi_manager_generate_acess_points_json(){
 
 }
 
-
-
-bool wifi_manager_lock_sta_ip_string(TickType_t xTicksToWait){
+bool wifi_manager_lock_sta_ip_string(TickType_t xTicksToWait) {
 	if(wifi_manager_sta_ip_mutex){
 		if( xSemaphoreTake( wifi_manager_sta_ip_mutex, xTicksToWait ) == pdTRUE ) {
 			return true;
-		}
-		else{
+		} else{
 			return false;
 		}
-	}
-	else{
+	} else{
 		return false;
 	}
-
 }
+
 void wifi_manager_unlock_sta_ip_string(){
 	xSemaphoreGive( wifi_manager_sta_ip_mutex );
 }
 
-void wifi_manager_safe_update_sta_ip_string(uint32_t ip){
-
+void wifi_manager_safe_update_sta_ip_string(uint32_t ip) {
 	if(wifi_manager_lock_sta_ip_string(portMAX_DELAY)){
 
 		esp_ip4_addr_t ip4;
@@ -384,12 +358,12 @@ void wifi_manager_safe_update_sta_ip_string(uint32_t ip){
 	}
 }
 
-char* wifi_manager_get_sta_ip_string(){
+char* wifi_manager_get_sta_ip_string() {
 	return wifi_manager_sta_ip;
 }
 
 
-bool wifi_manager_lock_json_buffer(TickType_t xTicksToWait){
+bool wifi_manager_lock_json_buffer(TickType_t xTicksToWait) {
 	if(wifi_manager_json_mutex){
 		if( xSemaphoreTake( wifi_manager_json_mutex, xTicksToWait ) == pdTRUE ) {
 			return true;
@@ -403,11 +377,11 @@ bool wifi_manager_lock_json_buffer(TickType_t xTicksToWait){
 	}
 
 }
-void wifi_manager_unlock_json_buffer(){
-	xSemaphoreGive( wifi_manager_json_mutex );
+void wifi_manager_unlock_json_buffer() {
+	xSemaphoreGive(wifi_manager_json_mutex);
 }
 
-char* wifi_manager_get_ap_list_json(){
+char* wifi_manager_get_ap_list_json() {
 	return accessp_json;
 }
 
@@ -415,11 +389,8 @@ char* wifi_manager_get_ap_list_json(){
 /**
  * @brief Standard wifi event handler
  */
-static void wifi_manager_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data){
-
-
+static void wifi_manager_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
 	if (event_base == WIFI_EVENT){
-
 		switch(event_id){
 
 		/* The Wi-Fi driver will never generate this event, which, as a result, can be ignored by the application event

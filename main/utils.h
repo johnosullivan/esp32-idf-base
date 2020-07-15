@@ -5,7 +5,11 @@
 extern "C" {
 #endif
 
+#include "constants.h"
+
 void wifi_scanner();
+
+void set_logging_levels();
 
 #ifdef __cplusplus
 }

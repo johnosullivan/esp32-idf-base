@@ -11,6 +11,41 @@ menu "Core App Configuration"
 
             GPIOs 35-39 are input-only so cannot be used as outputs.
 
+    config MIHOME_API_URI
+        string "MiHome API URI"
+        default "https://mihome.io/api"
+        help
+            Todo
+
+    config WIFI_CORE_LOGGING
+        int "Disable the default wifi core logging"
+        default 0
+        help
+            Todo
+
+    config CONNECT_IOT_OPTION
+        int "0 = Wifi Server SoftAP Setup, 1 = BLE/SoftAP Setup"
+        default 1
+        help
+            Todo
+
+endmenu
+
+menu "Bluetooth App Configuration"
+
+    config BT_WIFI_LIST_NUM
+        int "BT Wifi list num max"
+        range 0 50
+        default 15
+        help
+            Todo
+
+    config BLUFI_DEVICE_NAME
+        string "BlUFI device name"
+        default "mihome-core"
+        help
+            Todo
+
 endmenu
 
 menu "Wifi Manager Configuration"

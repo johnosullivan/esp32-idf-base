@@ -19,6 +19,8 @@
 
 #include "constants.h"
 
+static const char *TAG_UTILS = "mihome_esp32_utils";
+
 static void wifi_scanner_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
    if (event_id == SYSTEM_EVENT_SCAN_DONE) {
@@ -28,9 +30,9 @@ static void wifi_scanner_handler(void* arg, esp_event_base_t event_base, int32_t
       wifi_ap_record_t *list = (wifi_ap_record_t *)malloc(sizeof(wifi_ap_record_t) * apCount);
       ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&apCount, list));
       int i;
-      ESP_LOGI(TAG_BASE, "======================================================================");
-      ESP_LOGI(TAG_BASE, "             SSID             |    RSSI    |           AUTH           ");
-      ESP_LOGI(TAG_BASE, "======================================================================");
+      ESP_LOGI(TAG_UTILS, "======================================================================");
+      ESP_LOGI(TAG_UTILS, "             SSID             |    RSSI    |           AUTH           ");
+      ESP_LOGI(TAG_UTILS, "======================================================================");
       for (i=0; i<apCount; i++) {
          char *authmode;
          switch(list[i].authmode) {
@@ -53,10 +55,17 @@ static void wifi_scanner_handler(void* arg, esp_event_base_t event_base, int32_t
                authmode = "Unknown";
                break;
          }
-         ESP_LOGI(TAG_BASE, "%26.26s    |    % 4d    |    %22.22s",list[i].ssid, list[i].rssi, authmode);
+         ESP_LOGI(TAG_UTILS, "%26.26s    |    % 4d    |    %22.22s",list[i].ssid, list[i].rssi, authmode);
       }
       free(list);
    }
+}
+
+void set_logging_levels() {
+  /* disable the default wifi logging */
+  if (WIFI_CORE_LOGGING != 0) {
+    esp_log_level_set("wifi", ESP_LOG_NONE);
+  }
 }
 
 void wifi_scanner() {
