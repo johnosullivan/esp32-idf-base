@@ -126,6 +126,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
             memcpy(gl_sta_ssid, event->ssid, event->ssid_len);
             gl_sta_ssid_len = event->ssid_len;
             ESP_LOGI(TAG_BT_MG, "BLUFI/STA/CONNECTED");
+
+            esp_ble_gap_stop_advertising();
             break;
         case WIFI_EVENT_STA_DISCONNECTED:
             gl_sta_connected = false;

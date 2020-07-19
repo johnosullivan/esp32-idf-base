@@ -11,6 +11,10 @@ void wifi_scanner();
 
 void set_logging_levels();
 
+esp_err_t nvs_get_str_value(char *namespace, char *key, char *ref);
+
+esp_err_t nvs_set_str_value(char *namespace, char *key, char *ref);
+
 #ifdef __cplusplus
 }
 #endif

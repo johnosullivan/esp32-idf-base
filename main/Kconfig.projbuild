@@ -11,9 +11,9 @@ menu "Core App Configuration"
 
             GPIOs 35-39 are input-only so cannot be used as outputs.
 
-    config MIHOME_API_URI
-        string "MiHome API URI"
-        default "https://mihome.io/api"
+    config MIHOME_BASE_URI
+        string "MiHome Base URI"
+        default "mihome.io"
         help
             Todo
 

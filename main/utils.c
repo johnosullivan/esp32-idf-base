@@ -97,3 +97,42 @@ void wifi_scanner() {
     ESP_ERROR_CHECK(esp_wifi_stop());
     ESP_ERROR_CHECK(esp_event_loop_delete_default());
 }
+
+esp_err_t nvs_get_str_value(char *namespace, char *key, char *ref) {
+    esp_err_t err;
+    nvs_handle_t nvs_handle;
+    err = nvs_open(namespace, NVS_READWRITE, &nvs_handle);
+
+    if (err != ESP_OK) {
+      return err;
+    } else {
+      size_t required_size = 0;
+      err = nvs_get_str(nvs_handle, key, ref, &required_size);
+
+      switch (err) {
+          case ESP_OK:
+              break;
+          case ESP_ERR_NVS_NOT_FOUND:
+              break;
+          default:
+              ESP_LOGI(TAG_UTILS, "nvs_get_str_value_error = (%s)", esp_err_to_name(err));
+      }
+    }
+    nvs_close(nvs_handle);
+    return err;
+}
+
+esp_err_t nvs_set_str_value(char *namespace, char *key, char *ref) {
+    esp_err_t err;
+    nvs_handle_t nvs_handle;
+    err = nvs_open(namespace, NVS_READWRITE, &nvs_handle);
+
+    if (err != ESP_OK) {
+      return err;
+    } else {
+      err = nvs_set_str(nvs_handle, key, ref);
+      err = nvs_commit(nvs_handle);
+    }
+    nvs_close(nvs_handle);
+    return err;
+}
