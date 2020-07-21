@@ -32,6 +32,8 @@
 // Over The Air (OTA) Updates
 #include "esp_https_ota.h"
 
+#include "cJSON.h"
+
 static const char *TAG_BASE = "mihome_esp32_base";
 
 #define MAX_HTTP_OUTPUT_BUFFER 2048
@@ -294,6 +296,27 @@ void app_main(void)
     init_status_led();
     update_status_led("0000ff");
     */
+
+    /*
+    cJSON *root;
+    root = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(root, "hwid", "ae1f984b-9b2e-40ba-be28-5dde779251ca");
+    cJSON_AddStringToObject(root, "mac", "00:11:22:AA:BB:CC");
+    cJSON_AddStringToObject(root, "pk", "");
+
+    char *renderedJSON = cJSON_PrintUnformatted(root);
+    ESP_LOGI(TAG_BASE, "%s", renderedJSON);
+
+    cJSON_Delete(root);
+    */
+
+
+    //Get MAC address for Bluetooth
+    /*ESP_ERROR_CHECK(esp_read_mac(derived_mac_addr, ESP_MAC_BT));
+    ESP_LOGI("BT MAC", "%x:%x:%x:%x:%x:%x",
+             derived_mac_addr[0], derived_mac_addr[1], derived_mac_addr[2],
+             derived_mac_addr[3], derived_mac_addr[4], derived_mac_addr[5]);*/
 
     /*
     while(true){

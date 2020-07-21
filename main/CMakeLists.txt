@@ -1,5 +1,6 @@
 idf_component_register (
     SRCS  "main.c"
+          "cJSON.c"
           "utils.c"
           "ws2812.c"
           "bt_manager/blufi_security.c"
