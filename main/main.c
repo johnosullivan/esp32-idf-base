@@ -54,6 +54,8 @@ void init_status_led();
 void update_status_led(char *color_hex);
 /* WS2812_END */
 
+void processing_ws_data(char *data);
+
 esp_err_t firmware_upgrade();
 
 // Secure Websocket timer and handles
@@ -93,10 +95,30 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
 }
 
 void system_monitoring_task(void *pvParameter) {
-	for(;;) {
-		ESP_LOGI(TAG_BASE, ": %d", esp_get_free_heap_size());
-		vTaskDelay(pdMS_TO_TICKS(60000));
-	}
+  	for(;;) {
+  		ESP_LOGI(TAG_BASE, ": %d", esp_get_free_heap_size());
+  		vTaskDelay(pdMS_TO_TICKS(60000));
+  	}
+}
+
+void ping_ws2812_signal() {
+    for (int i = 1; i < 8; i++) {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("9400d3");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("4b0082");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("0000ff");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("00ff00");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("ffff00");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("ff7f00");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      update_status_led("ff0000");
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
 }
 
 static void shutdown_signaler(TimerHandle_t xTimer) {
@@ -122,9 +144,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
 
           char rcv_buffer[data->data_len];
           strcpy(rcv_buffer,(char*)data->data_ptr);
-          //update_status_led(rcv_buffer);
-          esp_err_t err = nvs_set_str_value("storage", "hardware_uuid", rcv_buffer);
-          ESP_ERROR_CHECK(err);
+          processing_ws_data(rcv_buffer);
         }
 
         xTimerReset(shutdown_signal_timer, portMAX_DELAY);
@@ -135,9 +155,36 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     }
 }
 
+void processing_ws_data(char *data) {
+    cJSON *json_obj = cJSON_Parse(data);
+    const cJSON *type = NULL;
+
+    if (json_obj == NULL)
+    {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL)
+        {
+            ESP_LOGI(TAG_BASE, " error before: %s", error_ptr);
+        }
+        goto end;
+    }
+
+    type = cJSON_GetObjectItemCaseSensitive(json_obj, "type");
+    if (cJSON_IsString(type) && (type->valuestring != NULL))
+    {
+        ESP_LOGI(TAG_BASE, "type %s", type->valuestring);
+        goto end;
+    } else {
+        goto end;
+    }
+
+    end:
+      cJSON_Delete(json_obj);
+}
+
 static void websocket_app_start(void) {
     esp_websocket_client_config_t websocket_cfg = {
-      .uri = "ws://10.0.0.241:3000/ws",
+      .uri = "ws://10.0.0.245:3000/ws",
       //.cert_pem = api_cert_pem_start
     };
 
@@ -155,20 +202,8 @@ static void websocket_app_start(void) {
 
     xTimerStart(shutdown_signal_timer, portMAX_DELAY);
 
-    /*
-    char data[32];
-    int i = 0;
-    while (i < 20) {
-        if (esp_websocket_client_is_connected(client)) {
-            int len = sprintf(data, "hello %04d", i++);
-            ESP_LOGI(TAG_BASE, "Sending %s", data);
-            esp_websocket_client_send_text(client, data, len, portMAX_DELAY);
-        }
-        vTaskDelay(5000 / portTICK_RATE_MS);
-    }
-    */
-
     xSemaphoreTake(shutdown_sema, portMAX_DELAY);
+
     esp_websocket_client_stop(client);
     esp_websocket_client_destroy(client);
 }
@@ -179,7 +214,7 @@ void cb_connection_established(void *pvParameter) {
 
   wifi_ap_record_t wifidata;
   if (esp_wifi_sta_get_ap_info(&wifidata) == 0){
-    ESP_LOGI(TAG_BASE, "rssi: %d", wifidata.rssi);
+    ESP_LOGI(TAG_BASE, "wifi_rssi: %d", wifidata.rssi);
   }
 
   /*
@@ -207,14 +242,15 @@ void cb_connection_established(void *pvParameter) {
   //esp_err_t err = nvs_set_str_value("storage", "hardware_uuid", "this is a test");
   //ESP_ERROR_CHECK(err);
 
-  esp_err_t err;
+  /*esp_err_t err;
   char uuid[30];
   err = nvs_get_str_value("storage", "hardware_uuid", uuid);
   if (err == ESP_OK) {
     ESP_LOGI(TAG_BASE, "hardware_uuid = %s", uuid);
-  }
+  }*/
 
   websocket_app_start();
+  //firmware_upgrade();
 }
 
 void update_status_led(char *color_hex) {
@@ -229,7 +265,7 @@ esp_err_t firmware_upgrade()
 {
     update_status_led("ffea6b");
     esp_http_client_config_t config = {
-        .url = "http://10.0.0.241:8000/esp32mihome.bin",
+        .url = "http://10.0.0.245:8000/esp32mihome.bin",
         //.cert_pem = api_cert_pem_start,
         .timeout_ms = 60000
     };
@@ -244,7 +280,7 @@ esp_err_t firmware_upgrade()
 }
 
 void init_status_led() {
-    rmt_config_t config = RMT_DEFAULT_CONFIG_TX(4, RMT_TX_CHANNEL);
+    rmt_config_t config = RMT_DEFAULT_CONFIG_TX(21, RMT_TX_CHANNEL);
     config.clk_div = 2;
 
     ESP_ERROR_CHECK(rmt_config(&config));
@@ -289,13 +325,19 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     */
 
-    /*
-    wifi_manager_start();
-    wifi_manager_set_callback(EVENT_STA_GOT_IP, &cb_connection_established);
+
+    //wifi_manager_start();
+    //wifi_manager_set_callback(EVENT_STA_GOT_IP, &cb_connection_established);
 
     init_status_led();
+
     update_status_led("0000ff");
-    */
+
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+    ping_ws2812_signal();
+
+    update_status_led("0000ff");
 
     /*
     cJSON *root;
