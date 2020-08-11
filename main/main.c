@@ -48,19 +48,26 @@ extern const char api_cert_pem_end[]   asm("_binary_api_cert_pem_end");
 #include "driver/rmt.h"
 
 #define RMT_TX_CHANNEL RMT_CHANNEL_0
+#define PING_COMMAND "PING"
 
 led_strip_t *strip;
+
 void init_status_led();
+void ping_ws2812_signal();
 void update_status_led(char *color_hex);
 /* WS2812_END */
 
-void processing_ws_data(char *data);
-
-esp_err_t firmware_upgrade();
-
-// Secure Websocket timer and handles
+/* WS_START */
+/*
+ Secure Websocket timer and handles
+*/
 static TimerHandle_t shutdown_signal_timer;
 static SemaphoreHandle_t shutdown_sema;
+
+void processing_ws_data(char *data);
+/* WS_END */
+
+esp_err_t firmware_upgrade();
 
 esp_err_t _http_event_handle(esp_http_client_event_t *evt)
 {
@@ -119,6 +126,7 @@ void ping_ws2812_signal() {
       update_status_led("ff0000");
       vTaskDelay(100 / portTICK_PERIOD_MS);
     }
+    update_status_led("00ff00");
 }
 
 static void shutdown_signaler(TimerHandle_t xTimer) {
@@ -170,9 +178,16 @@ void processing_ws_data(char *data) {
     }
 
     type = cJSON_GetObjectItemCaseSensitive(json_obj, "type");
+
     if (cJSON_IsString(type) && (type->valuestring != NULL))
     {
-        ESP_LOGI(TAG_BASE, "type %s", type->valuestring);
+        char *typeValue = type->valuestring;
+
+        if (strcmp(typeValue, PING_COMMAND) == 0) {
+            ping_ws2812_signal();
+        }
+
+        ESP_LOGI(TAG_BASE, "WSType: %s", typeValue);
         goto end;
     } else {
         goto end;
@@ -325,19 +340,21 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     */
 
-
-    //wifi_manager_start();
-    //wifi_manager_set_callback(EVENT_STA_GOT_IP, &cb_connection_established);
-
     init_status_led();
 
     update_status_led("0000ff");
 
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    wifi_manager_start();
+    wifi_manager_set_callback(EVENT_STA_GOT_IP, &cb_connection_established);
+
+    //bt_manager_start();
+    //bt_manager_set_callback(EVENT_STA_GOT_IP, &cb_connection_established);
+
+    /*vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     ping_ws2812_signal();
 
-    update_status_led("0000ff");
+    update_status_led("0000ff");*/
 
     /*
     cJSON *root;
