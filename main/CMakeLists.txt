@@ -3,8 +3,6 @@ idf_component_register (
           "cJSON.c"
           "utils.c"
           "ws2812.c"
-          "bt_manager/blufi_security.c"
-          "bt_manager/bt_manager.c"
           "wifi_manager/wifi_manager.c"
           "wifi_manager/dns_server.c"
           "wifi_manager/http_server.c"
