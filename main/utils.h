@@ -15,6 +15,12 @@ esp_err_t nvs_get_str_value(char *namespace, char *key, char *ref);
 
 esp_err_t nvs_set_str_value(char *namespace, char *key, char *ref);
 
+void init_status_led(uint8_t pin);
+
+void update_status_led(char *color_hex);
+
+void ping_ws2812_signal();
+
 #ifdef __cplusplus
 }
 #endif

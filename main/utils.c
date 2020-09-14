@@ -19,6 +19,17 @@
 
 #include "constants.h"
 
+#include "utils.h"
+
+/* WS2812_START */
+#include "ws2812.h"
+#include "driver/rmt.h"
+
+#define RMT_TX_CHANNEL RMT_CHANNEL_0
+
+led_strip_t *strip;
+/* WS2812_END */
+
 static const char *TAG_UTILS = "mihome_esp32_utils";
 
 static void wifi_scanner_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
@@ -135,4 +146,46 @@ esp_err_t nvs_set_str_value(char *namespace, char *key, char *ref) {
     }
     nvs_close(nvs_handle);
     return err;
+}
+
+void init_status_led(uint8_t pin) {
+    rmt_config_t config = RMT_DEFAULT_CONFIG_TX(pin, RMT_TX_CHANNEL);
+    config.clk_div = 2;
+
+    ESP_ERROR_CHECK(rmt_config(&config));
+
+    ESP_ERROR_CHECK(rmt_driver_install(config.channel, 0, 0));
+
+    led_strip_config_t strip_config = LED_STRIP_DEFAULT_CONFIG(1, (led_strip_dev_t)config.channel);
+
+    strip = led_strip_new_rmt_ws2812(&strip_config);
+}
+
+void update_status_led(char *color_hex) {
+    int r, g, b;
+    sscanf(color_hex, "%02x%02x%02x", &r, &g, &b);
+    ESP_ERROR_CHECK(strip->clear(strip, 0));
+    ESP_ERROR_CHECK(strip->set_pixel(strip, 0, r, g, b));
+    ESP_ERROR_CHECK(strip->refresh(strip, 0));
+}
+
+void ping_ws2812_signal() {
+    for (int i = 1; i < 8; i++) {
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("9400d3");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("4b0082");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("0000ff");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("00ff00");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("ffff00");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("ff7f00");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        update_status_led("ff0000");
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+    update_status_led("00ff00");
 }

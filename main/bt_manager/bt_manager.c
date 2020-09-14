@@ -18,41 +18,34 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#include "blufi_security.h"
 #include "bt_manager.h"
+#include "../wifi_manager/wifi_manager.h"
 
 static const char *TAG_BT_MG = "mihome_esp32_bt_manager";
 
-void (**cb_ptr_arr)(void*) = NULL;
+char *read_bt_data;
+uint8_t status = 0x00;
 
-#define BLUFI_DEVICE_NAME  CONFIG_BLUFI_DEVICE_NAME
-#define BT_WIFI_LIST_NUM  CONFIG_BT_WIFI_LIST_NUM
 
-const int BT_MANAGER_WIFI_CONNECTED_BIT = BIT0;
-
-static uint8_t service_uuid128[32] = {
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+static uint8_t attr_value_str[] = {
+    0x11,0x22,0x33
 };
-
-static esp_ble_adv_data_t adv_data = {
-    .set_scan_rsp = false,
-    .include_name = true,
-    .include_txpower = true,
-    .min_interval = 0x0006,
-    .max_interval = 0x0010,
-    .appearance = 0x00,
-    .manufacturer_len = 0,
-    .p_manufacturer_data =  NULL,
-    .service_data_len = 0,
-    .p_service_data = NULL,
-    .service_uuid_len = 16,
-    .p_service_uuid = service_uuid128,
-    .flag = 0x6,
+static esp_gatt_char_prop_t esp_gatt_property = 0;
+static esp_attr_value_t gatts_demo_char1_val = {
+    .attr_max_len = GATTS_CHAR_VAL_LEN_MAX,
+    .attr_len     = sizeof(attr_value_str),
+    .attr_value   = attr_value_str,
 };
-
+static uint8_t adv_config_done = 0;
+static uint8_t raw_adv_data[] = {
+    0x02, 0x01, 0x06, 0x02, 0x0a, 0xeb, 0x03, 0x03, 0xab, 0xcd
+};
+static uint8_t raw_scan_rsp_data[] = {
+    0x0f, 0x09, 0x45, 0x53, 0x50, 0x5f, 0x4d, 0x49, 0x48, 0x4f, 0x4d, 0x45, 0x00, 0x00, 0x00, 0x00
+};
 static esp_ble_adv_params_t adv_params = {
-    .adv_int_min        = 0x100,
-    .adv_int_max        = 0x100,
+    .adv_int_min        = 0x20,
+    .adv_int_max        = 0x40,
     .adv_type           = ADV_TYPE_IND,
     .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
     //.peer_addr            =
@@ -61,381 +54,484 @@ static esp_ble_adv_params_t adv_params = {
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
-static esp_blufi_callbacks_t bt_callbacks = {
-    .event_cb = bt_event_callback,
-    .negotiate_data_handler = blufi_dh_negotiate_data_handler,
-    .encrypt_func = blufi_aes_encrypt,
-    .decrypt_func = blufi_aes_decrypt,
-    .checksum_func = blufi_crc_checksum,
+
+struct gatts_profile_inst {
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+    uint16_t conn_id;
+    uint16_t service_handle;
+    esp_gatt_srvc_id_t service_id;
+    uint16_t char_handle;
+    esp_bt_uuid_t char_uuid;
+    esp_gatt_perm_t perm;
+    esp_gatt_char_prop_t property;
+    uint16_t descr_handle;
+    esp_bt_uuid_t descr_uuid;
 };
 
-static EventGroupHandle_t wifi_event_group;
-static wifi_config_t sta_config;
-static wifi_config_t ap_config;
-static bool gl_sta_connected = false;
-static bool ble_is_connected = false;
-static uint8_t gl_sta_bssid[6];
-static uint8_t gl_sta_ssid[32];
-static int gl_sta_ssid_len;
-static uint8_t server_if;
-static uint16_t conn_id;
+static struct gatts_profile_inst gl_profile_tab[PROFILE_NUM] = {
+    [PROFILE_APP_ID] = {
+        .gatts_cb = gatts_profile_event_handler,
+        .gatts_if = ESP_GATT_IF_NONE,
+    }
+};
 
-static void ip_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
-    wifi_mode_t mode;
-
-    switch (event_id) {
-        case IP_EVENT_STA_GOT_IP: {
-            esp_blufi_extra_info_t info;
-
-            xEventGroupSetBits(wifi_event_group, BT_MANAGER_WIFI_CONNECTED_BIT);
-            esp_wifi_get_mode(&mode);
-
-            memset(&info, 0, sizeof(esp_blufi_extra_info_t));
-            memcpy(info.sta_bssid, gl_sta_bssid, 6);
-            info.sta_bssid_set = true;
-            info.sta_ssid = gl_sta_ssid;
-            info.sta_ssid_len = gl_sta_ssid_len;
-            if (ble_is_connected == true) {
-                esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_SUCCESS, 0, &info);
-            } else {
-                ESP_LOGI(TAG_BT_MG, "BLUFI/BLE/NC");
+void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
+    switch (event) {
+        case ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT:
+            adv_config_done &= (~adv_config_flag);
+            if (adv_config_done==0) {
+                esp_ble_gap_start_advertising(&adv_params);
             }
-
-    				if(cb_ptr_arr[EVENT_STA_GOT_IP]) (*cb_ptr_arr[EVENT_STA_GOT_IP])(NULL);
             break;
-        }
+        case ESP_GAP_BLE_SCAN_RSP_DATA_RAW_SET_COMPLETE_EVT:
+            adv_config_done &= (~scan_rsp_config_flag);
+            if (adv_config_done==0) {
+                esp_ble_gap_start_advertising(&adv_params);
+            }
+            break;
+        case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+            if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGE(TAG_BT_MG, "ADST Failed");
+            }
+            break;
+        case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+            if (param->adv_stop_cmpl.status != ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGE(TAG_BT_MG, "ADS Failed");
+            }
+            break;
+        case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
+             ESP_LOGI(TAG_BT_MG, "UCPS = %d, min_int = %d, max_int = %d,conn_int = %d,latency = %d, timeout = %d",
+                      param->update_conn_params.status,
+                      param->update_conn_params.min_int,
+                      param->update_conn_params.max_int,
+                      param->update_conn_params.conn_int,
+                      param->update_conn_params.latency,
+                      param->update_conn_params.timeout);
+            break;
         default:
             break;
     }
-    return;
 }
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
-    wifi_event_sta_connected_t *event;
-    wifi_mode_t mode;
-
-    switch (event_id) {
-        case WIFI_EVENT_STA_START:
-            esp_wifi_connect();
-            ESP_LOGI(TAG_BT_MG, "BLUFI/STA/START");
-            break;
-        case WIFI_EVENT_STA_CONNECTED:
-            gl_sta_connected = true;
-            event = (wifi_event_sta_connected_t*) event_data;
-            memcpy(gl_sta_bssid, event->bssid, 6);
-            memcpy(gl_sta_ssid, event->ssid, event->ssid_len);
-            gl_sta_ssid_len = event->ssid_len;
-            ESP_LOGI(TAG_BT_MG, "BLUFI/STA/CONNECTED");
-
-            esp_ble_gap_stop_advertising();
-            break;
-        case WIFI_EVENT_STA_DISCONNECTED:
-            gl_sta_connected = false;
-            memset(gl_sta_ssid, 0, 32);
-            memset(gl_sta_bssid, 0, 6);
-            gl_sta_ssid_len = 0;
-            esp_wifi_connect();
-            xEventGroupClearBits(wifi_event_group, BT_MANAGER_WIFI_CONNECTED_BIT);
-            break;
-        case WIFI_EVENT_AP_START:
-            esp_wifi_get_mode(&mode);
-            if (ble_is_connected == true) {
-                if (gl_sta_connected) {
-                    esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_SUCCESS, 0, NULL);
-                } else {
-                    esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_FAIL, 0, NULL);
+void write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param) {
+    esp_gatt_status_t status = ESP_GATT_OK;
+    if (param->write.need_rsp){
+        if (param->write.is_prep){
+            if (prepare_write_env->prepare_buf == NULL) {
+                prepare_write_env->prepare_buf = (uint8_t *)malloc(PREPARE_BUF_MAX_SIZE*sizeof(uint8_t));
+                prepare_write_env->prepare_len = 0;
+                if (prepare_write_env->prepare_buf == NULL) {
+                    ESP_LOGE(TAG_BT_MG, "Gatt_server prep no mem\n");
+                    status = ESP_GATT_NO_RESOURCES;
+                }
+            } else {
+                if(param->write.offset > PREPARE_BUF_MAX_SIZE) {
+                    status = ESP_GATT_INVALID_OFFSET;
+                } else if ((param->write.offset + param->write.len) > PREPARE_BUF_MAX_SIZE) {
+                    status = ESP_GATT_INVALID_ATTR_LEN;
                 }
             }
+
+            esp_gatt_rsp_t *gatt_rsp = (esp_gatt_rsp_t *)malloc(sizeof(esp_gatt_rsp_t));
+            gatt_rsp->attr_value.len = param->write.len;
+            gatt_rsp->attr_value.handle = param->write.handle;
+            gatt_rsp->attr_value.offset = param->write.offset;
+            gatt_rsp->attr_value.auth_req = ESP_GATT_AUTH_REQ_NONE;
+            memcpy(gatt_rsp->attr_value.value, param->write.value, param->write.len);
+
+            esp_err_t response_err = esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, gatt_rsp);
+            if (response_err != ESP_OK) {
+               ESP_LOGE(TAG_BT_MG, "SEND_RES_ERROR");
+            }
+            free(gatt_rsp);
+            if (status != ESP_GATT_OK) {
+                return;
+            }
+            memcpy(prepare_write_env->prepare_buf + param->write.offset,
+                   param->write.value,
+                   param->write.len);
+            prepare_write_env->prepare_len += param->write.len;
+        } else {
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, NULL);
+        }
+    }
+}
+
+void exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param) {
+    if (param->exec_write.exec_write_flag == ESP_GATT_PREP_WRITE_EXEC){
+        esp_log_buffer_hex(TAG_BT_MG, prepare_write_env->prepare_buf, prepare_write_env->prepare_len);
+    }else{
+        ESP_LOGI(TAG_BT_MG,"ESP_GATT_PREP_WRITE_CANCEL");
+    }
+    if (prepare_write_env->prepare_buf) {
+        free(prepare_write_env->prepare_buf);
+        prepare_write_env->prepare_buf = NULL;
+    }
+    prepare_write_env->prepare_len = 0;
+}
+
+void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
+    switch (event) {
+        case ESP_GATTS_REG_EVT:
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_REG_EVT, status %d, app_id %d", param->reg.status, param->reg.app_id);
+
+            gl_profile_tab[PROFILE_APP_ID].service_id.is_primary = true;
+            gl_profile_tab[PROFILE_APP_ID].service_id.id.inst_id = 0x00;
+            gl_profile_tab[PROFILE_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
+            gl_profile_tab[PROFILE_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID;
+
+            esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(BT_DEVICE_NAME);
+            if (set_dev_name_ret){
+                ESP_LOGE(TAG_BT_MG, "set device name failed, error code = %x", set_dev_name_ret);
+            }
+
+            esp_err_t raw_adv_ret = esp_ble_gap_config_adv_data_raw(raw_adv_data, sizeof(raw_adv_data));
+            if (raw_adv_ret){
+                ESP_LOGE(TAG_BT_MG, "config raw adv data failed, error code = %x ", raw_adv_ret);
+            }
+            adv_config_done |= adv_config_flag;
+
+            esp_err_t raw_scan_ret = esp_ble_gap_config_scan_rsp_data_raw(raw_scan_rsp_data, sizeof(raw_scan_rsp_data));
+            if (raw_scan_ret){
+                ESP_LOGE(TAG_BT_MG, "config raw scan rsp data failed, error code = %x", raw_scan_ret);
+            }
+            adv_config_done |= scan_rsp_config_flag;
+
+            esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[PROFILE_APP_ID].service_id, GATTS_NUM_HANDLE);
             break;
-        case WIFI_EVENT_SCAN_DONE: {
-            uint16_t apCount = 0;
-            esp_wifi_scan_get_ap_num(&apCount);
-            if (apCount == 0) {
-                break;
+        case ESP_GATTS_READ_EVT: {
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_READ_EVT, conn_id %d, trans_id %d, handle %d", param->read.conn_id, param->read.trans_id, param->read.handle);
+
+            esp_gatt_rsp_t rsp;
+
+            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+            rsp.attr_value.handle = param->read.handle;
+
+            uint8_t * uhex = (uint8_t *)read_bt_data;
+            int size = strlen(read_bt_data);
+
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_READ_EVT_VALUE: %s", read_bt_data);
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_READ_EVT_VALUE_PS: %d", size);
+
+            rsp.attr_value.len = size;
+
+            for(int i = 0; i < size; i += 1)
+            {
+              rsp.attr_value.value[i] = uhex[i];
             }
 
-            wifi_ap_record_t *ap_list = (wifi_ap_record_t *)malloc(sizeof(wifi_ap_record_t) * apCount);
-            if (!ap_list) {
-                ESP_LOGE(TAG_BT_MG, "malloc error, ap_list is NULL");
-                break;
-            }
-            ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&apCount, ap_list));
+            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
+            break;
+        }
+        case ESP_GATTS_WRITE_EVT: {
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_WRITE_EVT, conn_id %d, trans_id %d, handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
+            if (!param->write.is_prep){
+                ESP_LOGI(TAG_BT_MG, "ESP_GATTS_WRITE_EVT, value len %d", param->write.len);
 
-            esp_blufi_ap_record_t * blufi_ap_list = (esp_blufi_ap_record_t *)malloc(apCount * sizeof(esp_blufi_ap_record_t));
-            if (!blufi_ap_list) {
-                if (ap_list) {
-                    free(ap_list);
+                char rcv_buffer[param->write.len];
+                strcpy(rcv_buffer,(char*)param->write.value);
+                ESP_LOGI(TAG_BT_MG, "rcv_buffer: %s", rcv_buffer);
+
+                parse_bt_json_playload(rcv_buffer);
+
+                esp_log_buffer_hex(TAG_BT_MG, param->write.value, param->write.len);
+            }
+            write_event_env(gatts_if, &prepare_write_env, param);
+            break;
+        }
+        case ESP_GATTS_EXEC_WRITE_EVT:
+            ESP_LOGI(TAG_BT_MG,"ESP_GATTS_EXEC_WRITE_EVT");
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+            exec_write_event_env(&prepare_write_env, param);
+            break;
+        case ESP_GATTS_MTU_EVT:
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
+            break;
+        case ESP_GATTS_UNREG_EVT:
+            break;
+        case ESP_GATTS_CREATE_EVT:
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_CREATE_EVT, status %d, service_handle %d", param->create.status, param->create.service_handle);
+
+            gl_profile_tab[PROFILE_APP_ID].service_handle = param->create.service_handle;
+            gl_profile_tab[PROFILE_APP_ID].char_uuid.len = ESP_UUID_LEN_16;
+            gl_profile_tab[PROFILE_APP_ID].char_uuid.uuid.uuid16 = GATTS_CHAR_UUID;
+
+            esp_ble_gatts_start_service(gl_profile_tab[PROFILE_APP_ID].service_handle);
+
+            esp_gatt_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+
+            esp_err_t add_char_ret = esp_ble_gatts_add_char(gl_profile_tab[PROFILE_APP_ID].service_handle, &gl_profile_tab[PROFILE_APP_ID].char_uuid,
+                                                            ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                                            esp_gatt_property,
+                                                            &gatts_demo_char1_val, NULL);
+            if (add_char_ret){
+                ESP_LOGE(TAG_BT_MG, "ACF, EC =%x",add_char_ret);
+            }
+            break;
+        case ESP_GATTS_ADD_INCL_SRVC_EVT:
+            break;
+        case ESP_GATTS_ADD_CHAR_EVT: {
+            break;
+        }
+        case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+            gl_profile_tab[PROFILE_APP_ID].descr_handle = param->add_char_descr.attr_handle;
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_ADD_CHAR_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
+                     param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+            break;
+        case ESP_GATTS_DELETE_EVT:
+            break;
+        case ESP_GATTS_START_EVT:
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_START_EVT, status %d, service_handle %d", param->start.status, param->start.service_handle);
+            break;
+        case ESP_GATTS_STOP_EVT:
+            break;
+        case ESP_GATTS_CONNECT_EVT: {
+            esp_ble_conn_update_params_t conn_params = {0};
+            memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+
+            /* For the IOS system, please reference the apple official documents about the ble connection parameters restrictions. */
+            conn_params.latency = 0;
+            conn_params.max_int = 0x20;    // max_int = 0x20*1.25ms = 40ms
+            conn_params.min_int = 0x10;    // min_int = 0x10*1.25ms = 20ms
+            conn_params.timeout = 400;     // timeout = 400*10ms = 4000ms
+
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x",
+                     param->connect.conn_id,
+                     param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
+                     param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
+            gl_profile_tab[PROFILE_APP_ID].conn_id = param->connect.conn_id;
+
+            //update led color
+            update_status_led(HEX_COLOR_YELLOW);
+
+            //start sent the update connection parameters to the peer device.
+            esp_ble_gap_update_conn_params(&conn_params);
+            break;
+        }
+        case ESP_GATTS_DISCONNECT_EVT:
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_DISCONNECT_EVT, disconnect reason 0x%x", param->disconnect.reason);
+            esp_ble_gap_start_advertising(&adv_params);
+            break;
+        case ESP_GATTS_CONF_EVT:
+            ESP_LOGI(TAG_BT_MG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
+            if (param->conf.status != ESP_GATT_OK){
+                esp_log_buffer_hex(TAG_BT_MG, param->conf.value, param->conf.len);
+            }
+            break;
+        case ESP_GATTS_OPEN_EVT:
+        case ESP_GATTS_CANCEL_OPEN_EVT:
+        case ESP_GATTS_CLOSE_EVT:
+        case ESP_GATTS_LISTEN_EVT:
+        case ESP_GATTS_CONGEST_EVT:
+        default:
+            break;
+    }
+}
+
+void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
+    /* If event is register event, store the gatts_if for each profile */
+    if (event == ESP_GATTS_REG_EVT) {
+        if (param->reg.status == ESP_GATT_OK) {
+            gl_profile_tab[param->reg.app_id].gatts_if = gatts_if;
+        } else {
+            ESP_LOGI(TAG_BT_MG, "RAF APP_ID: %04x, Status: %d", param->reg.app_id, param->reg.status);
+            return;
+        }
+    }
+    /* If the gatts_if equal to profile A, call profile A cb handler,
+     * so here call each profile's callback */
+    do {
+        int idx;
+        for (idx = 0; idx < PROFILE_NUM; idx++) {
+            if (gatts_if == ESP_GATT_IF_NONE || /* ESP_GATT_IF_NONE, not specify a certain gatt_if, need to call every profile cb function */
+                    gatts_if == gl_profile_tab[idx].gatts_if) {
+                if (gl_profile_tab[idx].gatts_cb) {
+                    gl_profile_tab[idx].gatts_cb(event, gatts_if, param);
                 }
-                ESP_LOGE(TAG_BT_MG, "malloc error, blufi_ap_list is NULL");
-                break;
             }
-            for (int i = 0; i < apCount; ++i) {
-                blufi_ap_list[i].rssi = ap_list[i].rssi;
-                memcpy(blufi_ap_list[i].ssid, ap_list[i].ssid, sizeof(ap_list[i].ssid));
-            }
-            if (ble_is_connected == true) {
-                esp_blufi_send_wifi_list(apCount, blufi_ap_list);
-            } else {
-                ESP_LOGI(TAG_BT_MG, "BLUFI/BLE/NC");
-            }
-            esp_wifi_scan_stop();
-            free(ap_list);
-            free(blufi_ap_list);
-            break;
         }
-        default:
-            break;
+    } while (0);
+}
+
+void parse_bt_json_playload(char *data) {
+    cJSON *json_obj = cJSON_Parse(data);
+    const cJSON *type = NULL;
+
+    if (json_obj == NULL)
+    {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL)
+        {
+            ESP_LOGI(TAG_BT_MG, " error before: %s", error_ptr);
+        }
+        goto end;
     }
-    return;
-}
 
-static void initialize_wifi(void)
-{
-    ESP_ERROR_CHECK(esp_netif_init());
-    wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    type = cJSON_GetObjectItemCaseSensitive(json_obj, "type");
 
-    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    assert(sta_netif);
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL));
+    if (cJSON_IsString(type) && (type->valuestring != NULL))
+    {
+        char *typeValue = type->valuestring;
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK( esp_wifi_start() );
-}
-
-void bt_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *param)
-{
-    switch (event) {
-        case ESP_BLUFI_EVENT_INIT_FINISH:
-            ESP_LOGI(TAG_BT_MG, "BLUFI/Init");
-
-            esp_ble_gap_set_device_name(BLUFI_DEVICE_NAME);
-            esp_ble_gap_config_adv_data(&adv_data);
-            break;
-        case ESP_BLUFI_EVENT_DEINIT_FINISH:
-            ESP_LOGI(TAG_BT_MG, "BLUFI/Deinit");
-            break;
-        case ESP_BLUFI_EVENT_BLE_CONNECT:
-            ESP_LOGI(TAG_BT_MG, "BLUFI/BLE Connect");
-            ble_is_connected = true;
-            server_if = param->connect.server_if;
-            conn_id = param->connect.conn_id;
-            esp_ble_gap_stop_advertising();
-            blufi_security_init();
-            break;
-        case ESP_BLUFI_EVENT_BLE_DISCONNECT:
-            ESP_LOGI(TAG_BT_MG, "BLUFI/BLE Disconnect");
-            ble_is_connected = false;
-            blufi_security_deinit();
-            esp_ble_gap_start_advertising(&adv_params);
-            break;
-        case ESP_BLUFI_EVENT_SET_WIFI_OPMODE:
-            ESP_LOGI(TAG_BT_MG, "BLUFI WIFI opmode = %d", param->wifi_mode.op_mode);
-            ESP_ERROR_CHECK(esp_wifi_set_mode(param->wifi_mode.op_mode));
-            break;
-        case ESP_BLUFI_EVENT_REQ_CONNECT_TO_AP:
-            esp_wifi_disconnect();
-            esp_wifi_connect();
-            break;
-        case ESP_BLUFI_EVENT_REQ_DISCONNECT_FROM_AP:
-            ESP_LOGI(TAG_BT_MG, "BLUFI/REQ Wifi Disconnect");
-            esp_wifi_disconnect();
-            break;
-        case ESP_BLUFI_EVENT_REPORT_ERROR:
-            ESP_LOGE(TAG_BT_MG, "BLUFI/REPORT/ERR code = %d", param->report_error.state);
-            esp_blufi_send_error_info(param->report_error.state);
-            break;
-        case ESP_BLUFI_EVENT_GET_WIFI_STATUS: {
-            wifi_mode_t mode;
-            esp_blufi_extra_info_t info;
-            esp_wifi_get_mode(&mode);
-            if (gl_sta_connected) {
-                memset(&info, 0, sizeof(esp_blufi_extra_info_t));
-                memcpy(info.sta_bssid, gl_sta_bssid, 6);
-                info.sta_bssid_set = true;
-                info.sta_ssid = gl_sta_ssid;
-                info.sta_ssid_len = gl_sta_ssid_len;
-                esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_SUCCESS, 0, &info);
-            } else {
-                esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_FAIL, 0, NULL);
-            }
-            ESP_LOGI(TAG_BT_MG, "BLUFI/STATUS/AP");
-            break;
+        if (strcmp(typeValue, "RESTART") == 0) {
+            // Restart to boot and connect to the MiHome mihomecloud
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            esp_restart();
         }
-        case ESP_BLUFI_EVENT_RECV_SLAVE_DISCONNECT_BLE:
-            ESP_LOGI(TAG_BT_MG, "BLUFI/CLOSE/GATT");
-            esp_blufi_close(server_if, conn_id);
-            break;
-        case ESP_BLUFI_EVENT_DEAUTHENTICATE_STA:
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_STA_BSSID:
-            memcpy(sta_config.sta.bssid, param->sta_bssid.bssid, 6);
-            sta_config.sta.bssid_set = 1;
-            esp_wifi_set_config(WIFI_IF_STA, &sta_config);
-            ESP_LOGD(TAG_BT_MG, "STA BSSID %s", sta_config.sta.ssid);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_STA_SSID:
-            strncpy((char *)sta_config.sta.ssid, (char *)param->sta_ssid.ssid, param->sta_ssid.ssid_len);
-            sta_config.sta.ssid[param->sta_ssid.ssid_len] = '\0';
-            esp_wifi_set_config(WIFI_IF_STA, &sta_config);
-            ESP_LOGD(TAG_BT_MG, "STA SSID %s", sta_config.sta.ssid);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_STA_PASSWD:
-            strncpy((char *)sta_config.sta.password, (char *)param->sta_passwd.passwd, param->sta_passwd.passwd_len);
-            sta_config.sta.password[param->sta_passwd.passwd_len] = '\0';
-            esp_wifi_set_config(WIFI_IF_STA, &sta_config);
-            ESP_LOGD(TAG_BT_MG, "STA PASSWORD %s", sta_config.sta.password);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_SOFTAP_SSID:
-            strncpy((char *)ap_config.ap.ssid, (char *)param->softap_ssid.ssid, param->softap_ssid.ssid_len);
-            ap_config.ap.ssid[param->softap_ssid.ssid_len] = '\0';
-            ap_config.ap.ssid_len = param->softap_ssid.ssid_len;
-            esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-            ESP_LOGD(TAG_BT_MG, "SOFTAP SSID %s, ssid len %d", ap_config.ap.ssid, ap_config.ap.ssid_len);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_SOFTAP_PASSWD:
-            strncpy((char *)ap_config.ap.password, (char *)param->softap_passwd.passwd, param->softap_passwd.passwd_len);
-            ap_config.ap.password[param->softap_passwd.passwd_len] = '\0';
-            esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-            ESP_LOGD(TAG_BT_MG, "SOFTAP PASSWORD %s len = %d", ap_config.ap.password, param->softap_passwd.passwd_len);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_SOFTAP_MAX_CONN_NUM:
-            if (param->softap_max_conn_num.max_conn_num > 4) {
-                return;
-            }
-            ap_config.ap.max_connection = param->softap_max_conn_num.max_conn_num;
-            esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-            ESP_LOGD(TAG_BT_MG, "SOFTAP MAX CONN NUM %d", ap_config.ap.max_connection);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_SOFTAP_AUTH_MODE:
-            if (param->softap_auth_mode.auth_mode >= WIFI_AUTH_MAX) {
-                return;
-            }
-            ap_config.ap.authmode = param->softap_auth_mode.auth_mode;
-            esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-            ESP_LOGD(TAG_BT_MG, "SOFTAP AUTH MODE %d", ap_config.ap.authmode);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_SOFTAP_CHANNEL:
-            if (param->softap_channel.channel > 13) {
-                return;
-            }
-            ap_config.ap.channel = param->softap_channel.channel;
-            esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-            ESP_LOGD(TAG_BT_MG, "SOFTAP CHANNEL %d", ap_config.ap.channel);
-            break;
-        case ESP_BLUFI_EVENT_GET_WIFI_LIST:{
-            wifi_scan_config_t scanConf = {
-                .ssid = NULL,
-                .bssid = NULL,
-                .channel = 0,
-                .show_hidden = false
-            };
-            ESP_ERROR_CHECK(esp_wifi_scan_start(&scanConf, true));
-            break;
-        }
-        case ESP_BLUFI_EVENT_RECV_CUSTOM_DATA:
-            esp_log_buffer_hex("BLUFI/CD", param->custom_data.data, param->custom_data.data_len);
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_USERNAME:
-            /* Not handle currently */
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_CA_CERT:
-            /* Not handle currently */
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_CLIENT_CERT:
-            /* Not handle currently */
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_SERVER_CERT:
-            /* Not handle currently */
-            break;
-    	  case ESP_BLUFI_EVENT_RECV_CLIENT_PRIV_KEY:
-            /* Not handle currently */
-            break;;
-    	  case ESP_BLUFI_EVENT_RECV_SERVER_PRIV_KEY:
-            /* Not handle currently */
-            break;
-        default:
-            break;
-        }
-}
 
-static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
-{
-    switch (event) {
-        case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
-            esp_ble_gap_start_advertising(&adv_params);
-            break;
-        default:
-            break;
+        if (strcmp(typeValue, "INFO") == 0) {
+            cJSON *root;
+            esp_chip_info_t chip_info;
+            esp_chip_info(&chip_info);
+
+            root = cJSON_CreateObject();
+            cJSON_AddStringToObject(root, "mh_version", MIHOME_VERSION);
+            cJSON_AddNumberToObject(root, "num_cores", chip_info.cores);
+            cJSON_AddNumberToObject(root, "revision", chip_info.revision);
+            cJSON_AddNumberToObject(root, "flash", spi_flash_get_chip_size() / (1024 * 1024));
+            cJSON_AddStringToObject(root, "device_name", BT_DEVICE_NAME);
+
+            // Checks the state of the device config
+            nvs_handle handle;
+            esp_err_t esp_err;
+            int32_t is_configured = 0;
+            esp_err = nvs_open(MIHOME_STORAGE_NAMESPACE, NVS_READWRITE, &handle);
+            if (esp_err == ESP_OK) {
+                esp_err = nvs_get_i32(handle, MIHOME_STORAGE_IS_CONFIG, &is_configured);
+                if (esp_err == ESP_OK) {
+                    cJSON_AddNumberToObject(root, MIHOME_STORAGE_IS_CONFIG, is_configured);
+                }
+            }
+            // Close NVS Handler
+            nvs_close(handle);
+
+            read_bt_data = cJSON_PrintUnformatted(root);
+            cJSON_Delete(root);
+        }
+
+        if (strcmp(typeValue, "CONFIG") == 0) {
+            cJSON *json_data = cJSON_GetObjectItemCaseSensitive(json_obj, "data");
+
+            cJSON *ssidValue = cJSON_GetObjectItemCaseSensitive(json_data, "ssid");
+            ESP_LOGI(TAG_BT_MG, "ssid: %s", ssidValue->valuestring);
+
+            cJSON *passwordValue = cJSON_GetObjectItemCaseSensitive(json_data, "password");
+            ESP_LOGI(TAG_BT_MG, "password: %s", passwordValue->valuestring);
+
+            nvs_handle handle;
+            esp_err_t esp_err;
+
+            int32_t is_configured = 1;
+
+            esp_err = nvs_open("espwifimgr", NVS_READWRITE, &handle);
+            if (esp_err != ESP_OK) { goto save_config_status; }
+
+                esp_err = nvs_set_blob(handle, "ssid", ssidValue->valuestring, 32);
+            if (esp_err != ESP_OK) { goto save_config_status; }
+
+                esp_err = nvs_set_blob(handle, "password", passwordValue->valuestring, 64);
+            if (esp_err != ESP_OK) { goto save_config_status; }
+
+                esp_err = nvs_set_blob(handle, "settings", &wifi_settings, sizeof(wifi_settings));
+            if (esp_err != ESP_OK) { goto save_config_status; }
+
+                esp_err = nvs_commit(handle);
+            if (esp_err != ESP_OK) { goto save_config_status; }
+
+            nvs_close(handle);
+
+            goto save_config_status;
+
+            save_config_status:
+                esp_err = nvs_open(MIHOME_STORAGE_NAMESPACE, NVS_READWRITE, &handle);
+
+                if (esp_err != ESP_OK) {
+                    ESP_LOGE(TAG_BT_MG, "Error (%s) opening NVS handler on Boot!", esp_err_to_name(esp_err));
+                }
+
+                esp_err = nvs_set_i32(handle, MIHOME_STORAGE_IS_CONFIG, is_configured);
+                esp_err = nvs_commit(handle);
+
+                // Close NVS Handler
+                nvs_close(handle);
+
+                // Update the device sync info
+                cJSON *root;
+                esp_chip_info_t chip_info;
+                esp_chip_info(&chip_info);
+
+                root = cJSON_CreateObject();
+                cJSON_AddStringToObject(root, "mh_version", MIHOME_VERSION);
+                cJSON_AddNumberToObject(root, "num_cores", chip_info.cores);
+                cJSON_AddNumberToObject(root, "revision", chip_info.revision);
+                cJSON_AddNumberToObject(root, "flash", spi_flash_get_chip_size() / (1024 * 1024));
+                cJSON_AddStringToObject(root, "device_name", BT_DEVICE_NAME);
+                cJSON_AddNumberToObject(root, "is_configured", is_configured);
+
+                read_bt_data = cJSON_PrintUnformatted(root);
+                cJSON_Delete(root);
+        }
+
+        ESP_LOGI(TAG_BT_MG, "BT_Payload_Type: %s", typeValue);
+        goto end;
+    } else {
+        goto end;
     }
+
+    end:
+      cJSON_Delete(json_obj);
 }
 
-void bt_manager_start(){
-  esp_err_t ret;
+void bt_manager_start() {
+    esp_err_t ret;
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
 
-  cb_ptr_arr = malloc(sizeof(sizeof(void(*)(void*))) *MESSAGE_CODE_COUNT);
-	for(int i=0; i<MESSAGE_CODE_COUNT; i++){
-		cb_ptr_arr[i] = NULL;
-	}
+    ret = esp_bt_controller_init(&bt_cfg);
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "%s ICF001: %s", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-  ret = nvs_flash_init();
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(ret);
+    ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "%s EBF001: %s", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-  initialize_wifi();
+    ret = esp_bluedroid_init();
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "%s IBF001: %s", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-  ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+    ret = esp_bluedroid_enable();
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "%s EBF002: %s", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-  esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-  ret = esp_bt_controller_init(&bt_cfg);
-  if (ret) {
-      ESP_LOGE(TAG_BT_MG, "%s initialize bt controller failed: %s\n", __func__, esp_err_to_name(ret));
-  }
+    ret = esp_ble_gatts_register_callback(gatts_event_handler);
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "GATTS_F001, EC = %x", ret);
+        return;
+    }
 
-  ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
-  if (ret) {
-      ESP_LOGE(TAG_BT_MG, "%s enable bt controller failed: %s\n", __func__, esp_err_to_name(ret));
-      return;
-  }
+    ret = esp_ble_gap_register_callback(gap_event_handler);
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "GATTS_F002, EC = %x", ret);
+        return;
+    }
 
-  ret = esp_bluedroid_init();
-  if (ret) {
-      ESP_LOGE(TAG_BT_MG, "%s init bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
-      return;
-  }
+    ret = esp_ble_gatts_app_register(PROFILE_APP_ID);
+    if (ret) {
+        ESP_LOGE(TAG_BT_MG, "GATTS_F003, EC = %x", ret);
+        return;
+    }
 
-  ret = esp_bluedroid_enable();
-  if (ret) {
-      ESP_LOGE(TAG_BT_MG, "%s init bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
-      return;
-  }
-
-  ESP_LOGI(TAG_BT_MG, "BLUFI/ADDR: "ESP_BD_ADDR_STR"", ESP_BD_ADDR_HEX(esp_bt_dev_get_address()));
-  ESP_LOGI(TAG_BT_MG, "BLUFI/VERSION %04x", esp_blufi_get_version());
-
-  ret = esp_ble_gap_register_callback(gap_event_handler);
-  if(ret){
-      ESP_LOGE(TAG_BT_MG, "%s gap register failed, error code = %x", __func__, ret);
-      return;
-  }
-
-  ret = esp_blufi_register_callbacks(&bt_callbacks);
-  if(ret){
-      ESP_LOGE(TAG_BT_MG, "%s blufi register failed, error code = %x", __func__, ret);
-      return;
-  }
-
-  esp_blufi_profile_init();
-}
-
-void bt_manager_set_callback(message_code_t message_code, void (*func_ptr)(void*) ){
-	if(cb_ptr_arr && message_code < MESSAGE_CODE_COUNT){
-		cb_ptr_arr[message_code] = func_ptr;
-	}
+    esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
+    if (local_mtu_ret) {
+        ESP_LOGE(TAG_BT_MG, "MTU Failed, EC = %x", local_mtu_ret);
+    }
 }
