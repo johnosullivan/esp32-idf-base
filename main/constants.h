@@ -44,9 +44,11 @@ typedef enum message_code_t {
 } message_code_t;
 
 #define MIHOME_SETTINGS_CLOUD_URL_MAX_SIZE 64
+#define MIHOME_SETTINGS_CLOUD_UUID_MAX_SIZE 64
 
 struct mihome_settings_t {
 	uint8_t cloud_url[MIHOME_SETTINGS_CLOUD_URL_MAX_SIZE];
+	uint8_t cloud_uuid[MIHOME_SETTINGS_CLOUD_UUID_MAX_SIZE];
 };
 extern struct mihome_settings_t mihome_settings;
 

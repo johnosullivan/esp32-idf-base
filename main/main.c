@@ -25,24 +25,12 @@
 #include "utils.h"
 #include "constants.h"
 
-/*
-#include "esp_bt.h"
-#include "esp_gap_ble_api.h"
-#include "esp_gatts_api.h"
-#include "esp_bt_defs.h"
-#include "esp_bt_main.h"
-#include "esp_gatt_common_api.h"
-*/
-
 // WiFI / Bluetooth Managers
 #include "wifi_manager/wifi_manager.h"
 #include "bt_manager/bt_manager.h"
 
 // Over The Air (OTA) Updates
 #include "esp_https_ota.h"
-
-
-
 
 // mbed support
 #include "mbedtls/rsa.h"
@@ -58,14 +46,12 @@
 #include "mbedtls/sha256.h" /* SHA-256 only */
 #include "mbedtls/md.h"     /* generic interface */
 
-
-
-
 #define MAX_HTTP_OUTPUT_BUFFER 2048
 #define NO_DATA_TIMEOUT_SEC 120
 
 struct mihome_settings_t mihome_settings = {
-    .cloud_url = "mihomecloud.herokuapp.com"
+    .cloud_url = "mihomecloud.herokuapp.com",
+    .cloud_uuid = ""
 };
 
 static const char *TAG_BASE = "mihome_esp32_base";
@@ -271,57 +257,7 @@ void app_main(void)
     /* 0 here means use the full SHA-256, not the SHA-224 variant */
     mbedtls_sha256(hello_buffer, hello_len, output1, 0);
     print_hex("SHA256 - ", output1, sizeof output1);
-
-
-    /*
-    const char unsigned privatekey[] = Call 
-                "-----BEGIN RSA PRIVATE KEY-----\r\n"
-                "MIIEowIBAAKCAQEAsp456264hOLDwPqGZnqml2PnXf4mZJMo5EffgX6fmpp2NAWw\r\n"
-                "aN9Na0BwxQXYaLcYPFxBPkHVpUBMRbd+bd5N2NES7HzQ1Ul42cUUbSNB8o2Teg4H\r\n"
-                "C6sBSyzbQD2vKeUBdi3hSw1OtJb+RbO/+YmD7Mr4MVYtIcT0CpqUEZtC+HRP2wbD\r\n"
-                "kXM2qPZybafUKMR8+MXeAVSCsCtm9CFJahceniuYqcDFlWAMwyACRPaHgsCz/hRC\r\n"
-                "JCtoS3LzRg9eetEZjFzkuYgwq6aPRLKFAKWQEZLgjcRlOjXIgSBgAmj3Szo6yVuc\r\n"
-                "RbfmsEQJUckIBgeo/kQ2s35ZuCBWFgQ6tSXygQIDAQABAoIBAE4ntagydkKPBqB1\r\n"
-                "/kDxAdvUNvSFtD7ltUrNuBptUWDQnU/9/UamDrYTKETNXffTxaMDqviWzejUzYrj\r\n"
-                "00o3r1Bjiyg3JRluYJbJCTsH5l8/W3xYjvSoCpTeN8FQPEjUj2MqiB3S4NFcED5n\r\n"
-                "fGSvqy39UcQktPLFvxK0uH1Ltm4Hm48WlKLckHiDnkLQqVGuAseIM9REf5fBYliy\r\n"
-                "jQtcMNGDPFTZSJG7qfx2tSmHpAXCB8tASlDyYc6xr/MXDP32fKQD2rq/ErIW5768\r\n"
-                "jDfl5lZ2P9fGTxwc7t56+DF7w48pyXpntBixxnmdJWa7WXLafXfwdsRn7NrFf3Ym\r\n"
-                "tfRNlRECgYEA0ek65nguuapheJJOPXJuPdlW90dsKQIRKJUYEVazxTTw7ixtjN4j\r\n"
-                "nvzw5zT3lldFshi8ra2lsSMgNd4laX39r07DJCaQpRF97OWriqUw68t4gZwdTCoN\r\n"
-                "UWykqhaDwbQtebyPzz50yA+N3GTNLCwaZbd60K1+mx5UDRyXKz4qjFcCgYEA2dYR\r\n"
-                "G0F3KmzHsbPLLccE5YzR5KafJcGpmQTBP86+aAliiWwHAVbj6G85xK33dwgTAhAf\r\n"
-                "AJ2L3ltSEtDNEUKkZfgI0cND/G7mhRxR1YBTDhPIilAMhbR0yPd4i1oYOocKP6xn\r\n"
-                "+JcVIisfz/m5sBZ0YklE5JHG4lJbvr8qLQp3MOcCgYAhu71/dCjuJXdsjPaN4Wnd\r\n"
-                "/qN/MbcsD+z5/JvVjX1uX8eoPvOMA9btofCE93oiavwEVv1bW+CYyvBON9kDTwAJ\r\n"
-                "wDqUAK6WGG2IOJCMw2dNPXGsQo5iww9I2pDL1Lpv0qjMO4VQ5NSXoghGNtzSEHRd\r\n"
-                "jFLsXjVOcF1JjiKtDFyCGQKBgQCiEKdNddkokSHIzZDeD/FOrwQBbw18U6bQFz+H\r\n"
-                "L1Ntp33N67cSggixhv6dmyg/QJyTrlbCaHQFDD/1i67lpoUU8AHvvay5A/ExGy6u\r\n"
-                "/vfLw2Axtvh6CRXR5nuigXcBJDK1yJjZ091/PEJAwvQpU6tm7Ef7HZGwE8H6GdNR\r\n"
-                "CzY+BQKBgBj28+CJn6u9Fvbi4fu/8YRYCBHQ+960/3Oia3x3HeH6WDrPMysXSVUO\r\n"
-                "95D/Qx7nO0QDX7hZAAGLvZjwnXuqg+fl2VtwLrpKxlVPNQlyb62de4aK7MMu5gfB\r\n"
-                "eHlC+ocX0AGD709u2fcFQpH/fttUf6pRuKZVThyCmxE6CCVjai59\r\n"
-                "-----END RSA PRIVATE KEY-----\r\n";
-
-
-    const char unsigned publickey[] = 
-                "-----BEGIN RSA PUBLIC KEY-----\r\n"
-                "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsp456264hOLDwPqGZnqm\r\n"
-                "l2PnXf4mZJMo5EffgX6fmpp2NAWwaN9Na0BwxQXYaLcYPFxBPkHVpUBMRbd+bd5N\r\n"
-                "2NES7HzQ1Ul42cUUbSNB8o2Teg4HC6sBSyzbQD2vKeUBdi3hSw1OtJb+RbO/+YmD\r\n"
-                "7Mr4MVYtIcT0CpqUEZtC+HRP2wbDkXM2qPZybafUKMR8+MXeAVSCsCtm9CFJahce\r\n"
-                "niuYqcDFlWAMwyACRPaHgsCz/hRCJCtoS3LzRg9eetEZjFzkuYgwq6aPRLKFAKWQ\r\n"
-                "EZLgjcRlOjXIgSBgAmj3Szo6yVucRbfmsEQJUckIBgeo/kQ2s35ZuCBWFgQ6tSXy\r\n"
-                "gQIDAQAB\r\n"
-                "-----END RSA PUBLIC KEY-----\r\n";
-    */
-
-    
-    
-
-
-
-    
+        
     /*
     mbedtls_gcm_context aes;
 
