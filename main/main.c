@@ -51,7 +51,7 @@
 
 struct mihome_settings_t mihome_settings = {
     .cloud_url = "mihomecloud.herokuapp.com",
-    .cloud_uuid = ""
+    .cloud_uuid = "5388ff13-7ece-469b-8341-7dec287f192f"
 };
 
 static const char *TAG_BASE = "mihome_esp32_base";
