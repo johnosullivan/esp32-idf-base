@@ -50,8 +50,8 @@
 #define NO_DATA_TIMEOUT_SEC 120
 
 struct mihome_settings_t mihome_settings = {
-    .cloud_url = "mihomecloud.herokuapp.com",
-    .cloud_uuid = "5388ff13-7ece-469b-8341-7dec287f192f"
+    .cloud_url = "nrmorrdxxmlpvgcokpzifcgsgrfzxqeo",
+    .cloud_uuid = "nrmorrdxxmlpvgcokpzifcgsgrfzxqeo"
 };
 
 static const char *TAG_BASE = "mihome_esp32_base";
@@ -126,8 +126,8 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
                 ESP_LOGW(TAG_BASE, "Received=%.*s", data->data_len, (char *)data->data_ptr);
                 ESP_LOGW(TAG_BASE, "Total payload length=%d, data_len=%d, current payload offset=%d", data->payload_len, data->data_len, data->payload_offset);
 
-                char rcv_buffer[data->data_len];
-                strcpy(rcv_buffer, (char*)data->data_ptr);
+                char rcv_buffer[data->data_len]; 
+                strncpy(rcv_buffer, (char*)data->data_ptr, data->data_len); // TODO: BUG CORE #0 PANIC strcpy
                 ESP_LOGI(TAG_BASE, "processing_ws_data");
                 processing_ws_data(rcv_buffer);
             }
